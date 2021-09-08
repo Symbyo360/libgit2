@@ -6,7 +6,18 @@ IF(DEBUG_POOL)
 ENDIF()
 ADD_FEATURE_INFO(debugpool GIT_DEBUG_POOL "debug pool allocator")
 
+IF(DEBUG_STRICT_ALLOC)
+	SET(GIT_DEBUG_STRICT_ALLOC 1)
+ENDIF()
+ADD_FEATURE_INFO(debugalloc GIT_DEBUG_STRICT_ALLOC "debug strict allocators")
+
+IF(DEBUG_STRICT_OPEN)
+	SET(GIT_DEBUG_STRICT_OPEN 1)
+ENDIF()
+ADD_FEATURE_INFO(debugopen GIT_DEBUG_STRICT_OPEN "path validation in open")
+
 INCLUDE(PkgBuildConfig)
+INCLUDE(SanitizeBool)
 
 # This variable will contain the libraries we need to put into
 # libgit2.pc's Requires.private. That is, what we're linking to or
@@ -32,10 +43,10 @@ IF(ENABLE_TRACE)
 ENDIF()
 ADD_FEATURE_INFO(tracing GIT_TRACE "tracing support")
 
-CHECK_FUNCTION_EXISTS(futimens HAVE_FUTIMENS)
 IF (HAVE_FUTIMENS)
 	SET(GIT_USE_FUTIMENS 1)
 ENDIF ()
+ADD_FEATURE_INFO(futimens GIT_USE_FUTIMENS "futimens support")
 
 CHECK_PROTOTYPE_DEFINITION(qsort_r
 	"void qsort_r(void *base, size_t nmemb, size_t size, void *thunk, int (*compar)(void *, const void *, const void *))"
@@ -186,8 +197,12 @@ ELSE()
 ENDIF()
 
 # Optional external dependency: zlib
+SanitizeBool(USE_BUNDLED_ZLIB)
+IF(USE_BUNDLED_ZLIB STREQUAL ON)
+	SET(USE_BUNDLED_ZLIB "Bundled")
+ENDIF()
 
-IF(NOT USE_BUNDLED_ZLIB)
+IF(USE_BUNDLED_ZLIB STREQUAL "OFF")
 	FIND_PACKAGE(ZLIB)
 	IF(ZLIB_FOUND)
 		LIST(APPEND LIBGIT2_SYSTEM_INCLUDES ${ZLIB_INCLUDE_DIRS})
@@ -202,7 +217,15 @@ IF(NOT USE_BUNDLED_ZLIB)
 		MESSAGE(STATUS "zlib was not found; using bundled 3rd-party sources." )
 	ENDIF()
 ENDIF()
-IF(USE_BUNDLED_ZLIB OR NOT ZLIB_FOUND)
+IF(USE_BUNDLED_ZLIB STREQUAL "Chromium")
+	# Don't add zlib target if it's already defined
+	IF (NOT TARGET zlib)
+		ADD_SUBDIRECTORY("${libgit2_SOURCE_DIR}/deps/chromium-zlib" "${libgit2_BINARY_DIR}/deps/chromium-zlib")
+	ENDIF()
+	LIST(APPEND LIBGIT2_INCLUDES "${libgit2_SOURCE_DIR}/deps/chromium-zlib")
+	LIST(APPEND LIBGIT2_OBJECTS $<TARGET_OBJECTS:chromium_zlib>)
+	ADD_FEATURE_INFO(zlib ON "using (Chromium) bundled zlib")
+ELSEIF(USE_BUNDLED_ZLIB OR NOT ZLIB_FOUND)
 	# Don't add zlib target if it's already defined
 	IF (NOT TARGET zlib)
 		ADD_SUBDIRECTORY("${libgit2_SOURCE_DIR}/deps/zlib" "${libgit2_BINARY_DIR}/deps/zlib")
@@ -362,9 +385,6 @@ ADD_LIBRARY(git2 ${WIN_RC} ${LIBGIT2_OBJECTS})
 TARGET_LINK_LIBRARIES(git2 ${LIBGIT2_LIBS})
 
 SET_TARGET_PROPERTIES(git2 PROPERTIES C_STANDARD 90)
-# SET_TARGET_PROPERTIES(git2 PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${libgit2_BINARY_DIR})
-# SET_TARGET_PROPERTIES(git2 PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${libgit2_BINARY_DIR})
-# SET_TARGET_PROPERTIES(git2 PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${libgit2_BINARY_DIR})
 
 # Workaround for Cmake bug #0011240 (see http://public.kitware.com/Bug/view.php?id=11240)
 # Win64+MSVC+static libs = linker error
@@ -378,7 +398,7 @@ if(SONAME)
 	set_target_properties(git2 PROPERTIES VERSION ${libgit2_VERSION})
 	set_target_properties(git2 PROPERTIES SOVERSION "${libgit2_VERSION_MAJOR}.${libgit2_VERSION_MINOR}")
 	if(LIBGIT2_FILENAME)
-		target_compile_definitions(git2internal PRIVATE LIBGIT2_FILENAME=\"${LIBGIT2_FILENAME}\")
+		target_compile_definitions(git2 PRIVATE LIBGIT2_FILENAME=\"${LIBGIT2_FILENAME}\")
 		set_target_properties(git2 PROPERTIES OUTPUT_NAME ${LIBGIT2_FILENAME})
 	elseif(DEFINED LIBGIT2_PREFIX)
 		set_target_properties(git2 PROPERTIES PREFIX "${LIBGIT2_PREFIX}")
